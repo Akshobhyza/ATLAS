@@ -5,6 +5,8 @@ Meet ATLAS, an autonomous robot built to find, pickup, and sort objects with abs
 <img width="1920" height="1080" alt="Screenshot 2026-08-12 at 11 04 58 AM" src="https://github.com/user-attachments/assets/70fe61cd-f5b2-4f25-8cda-0d21e6f71834" />
 
 
+<p> DEMO LINK: https://cad.onshape.com/documents/8344d425af85321919fd70ba/w/e938afa8e847260ac57abb2e/e/849c61a34d9bbbbca970fb94 </p>
+
 # KEY FEATURES 
 Moves around on its own.
 Detects objects in its path using a camera.
