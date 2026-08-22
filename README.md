@@ -22,9 +22,9 @@ Displays information about what the robot is doing.
 To run code, open a nano inside the Raspberry Pi Python Terminal, and upload the code into the nano, then run the code using python3 (your nano name here) and wait for it to initialize.
 
 # How it works
-Atlas is designed around a split between the Raspberry Pi and Arduino: the Pi handles the camera and object detection, while the Arduino handles the robot’s motors, sensors, and servos. This keeps the time-sensitive hardware control separate from the more computationally intensive vision processing and lets each part focus on what it does best.
+Atlas is an efficient robot designed to use advanced object recognition using OpenCV and COCO to detect objects. Object recognition is powered by the Raspberry Pi 3B+. Atlas also uses an Arduino Uno R4 WiFi in order to control all of the sensor nodes, information, telemetry, and motor movements (Including the Drivetrain and robotic arm). The Raspberry Pi gets camera input on objects, size, and approximate weight. Based on this information, it sends keywords like "LIFT", or "RIGHT" to the R4, which then decodes those keywords into specific if/then arguments which make it easy for the Pi and Arduino to communicate.
 
-A major design choice was using a lightweight object-detection model rather than a larger, more accurate model. The Pi 3B+ has limited processing power, so a smaller model makes detection fast enough to be useful while the robot is moving. Atlas also uses confidence scores instead of treating every detection as certain, allowing it to ignore objects it isn't confident it can identify or pick up.
+One important decision I had to make for Atlas was removing the 3rd microcontroller. Before, I was using the Pi and R4, but also an Arduino Uno R3, but I decided to remove the R3 because I realized that it would take up more space, make all the wiring more difficult, and in general make everything more complicated with no need. Previously the R4 was controlling all sensors and screens, and the R3 was controlling the drivetrain and arm (movement related stuff), but now the R4 controls everything. 
 
 # Credits
 Raspberry Pi Foundation — Raspberry Pi hardware and camera ecosystem.
