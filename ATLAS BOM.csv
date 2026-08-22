@@ -1,0 +1,15 @@
+Item Name,Qty,Price (total) (USD),Item link,Notes
+10PCK SG90 Servo motors        ,1,$15.99,https://www.amazon.com/gp/product/B09GFN98X9/ref=ox_sc_act_title_1?smid=A1PKC2PUMNR8VD&psc=1,"5 Servos needed for the arm, extra because SG90's tend to break often"
+BTS7960 Motor driver 2pk,2,$30.00,https://www.amazon.com/gp/product/B0D732VYGZ/ref=ox_sc_act_title_2?smid=A3AG45GXH6FGYX&psc=1,"Motor drivers, 1 driver per motor"
+72Pcs Screw Terminal Block,1,$8.95,https://www.amazon.com/gp/product/B0D1GMMTZ5/ref=ox_sc_act_title_5?smid=A2UXHIGK0EM1ZO&psc=1,To connect motor driver outputs to breadboard
+Rubber Grip Tape,1,$8.99,https://www.amazon.com/gp/product/B0GYF6XZ47/ref=ox_sc_act_title_6?smid=A1J6D7UF4NTHDT&psc=1,So that plastic wheels dont slip
+On/Off switch 5pc,1,$6.39,https://www.amazon.com/gp/product/B07S1MV462/ref=ox_sc_act_title_5?smid=AVZNWT0O79W01&psc=1,To turn robot on and off
+XT60 Connectors,1,$9.99,https://www.amazon.com/gp/product/B0DB1LBGSH/ref=ox_sc_act_title_6?smid=A3FDRWQ9749CUZ&psc=1,To connect battery to breaboard
+Buck converter 10pcs,1,$8.99,https://www.amazon.com/gp/product/B0DKTMGBHL/ref=ox_sc_act_title_7?smid=A38CU2XC1RY0BO&psc=1,To step down 11.1V motor battery voltage to a suitable 5V 
+LCD Screen 3pcs,1,$16.99,https://www.amazon.com/gp/product/B0C1G9GBRZ/ref=ox_sc_act_title_8?smid=A1PKC2PUMNR8VD&psc=1,To display stats
+Distance sensor 5pk,1,$9.99,https://www.amazon.com/gp/product/B09PG4HTT1/ref=ox_sc_act_title_9?smid=A1EV68LJIO4NII&psc=1,Avoid crashes 
+Screw Kit M3,1,$9.99,https://www.amazon.com/gp/product/B0GS8FZLTK/ref=ox_sc_act_title_12?smid=A1FA0UJGUNVMLI&psc=1,Put everything together
+LiPo Battery Balance Charger,1,$16.99,https://www.amazon.com/gp/product/B0FPDJP4GK/ref=ox_sc_act_title_13?smid=A3OUEA3BPILM2W&psc=1,To charge the LiPo batteries
+LiPo Battery 11.1V 3S 2pck,1,$37.99,https://www.amazon.com/gp/product/B0BYNSH6Q7/ref=ox_sc_act_title_12?smid=A646DVGSXYMNH&psc=1,Powers the whole robot
+
+Total Price (USD):,$181.25,,,
