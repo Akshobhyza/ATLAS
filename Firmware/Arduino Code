@@ -1,0 +1,428 @@
+#include <Servo.h>
+
+// =============================
+// SERVO PINS
+// =============================
+const int BASE_PIN = 9;
+const int ARM1_PIN = 10;
+const int ARM2_PIN = 11;
+const int CLAW_PIN = 6;
+
+// =============================
+// SERVOS
+// =============================
+Servo baseServo;
+Servo arm1Servo;
+Servo arm2Servo;
+Servo clawServo;
+
+// =============================
+// CURRENT POSITIONS
+// =============================
+int basePos = 90;
+int arm1Pos = 90;
+int arm2Pos = 90;
+int clawPos = 0;
+
+// =============================
+// LIMITS
+// =============================
+const int BASE_MIN = 0;
+const int BASE_MAX = 180;
+
+const int ARM1_MIN = 0;
+const int ARM1_MAX = 130;
+
+const int ARM2_MIN = 0;
+const int ARM2_MAX = 130;
+
+const int CLAW_MIN = 0;
+const int CLAW_MAX = 90;
+
+// =============================
+// MOVEMENT SPEED
+// Smaller = faster
+// =============================
+const int MOVE_DELAY = 15;
+
+
+// ============================================================
+// SAFELY MOVE A SERVO
+// ============================================================
+
+void moveServoSlow(
+  Servo &servo,
+  int &current,
+  int target,
+  int minimum,
+  int maximum
+) {
+
+  target = constrain(target, minimum, maximum);
+
+  while (current != target) {
+
+    if (current < target) {
+      current++;
+    } else {
+      current--;
+    }
+
+    servo.write(current);
+
+    delay(MOVE_DELAY);
+  }
+}
+
+
+// ============================================================
+// MOVE ALL ARM JOINTS
+// ============================================================
+
+void moveArm(int baseTarget, int arm1Target, int arm2Target) {
+
+  baseTarget = constrain(baseTarget, BASE_MIN, BASE_MAX);
+  arm1Target = constrain(arm1Target, ARM1_MIN, ARM1_MAX);
+  arm2Target = constrain(arm2Target, ARM2_MIN, ARM2_MAX);
+
+  // Move gradually toward the target.
+  while (
+    basePos != baseTarget ||
+    arm1Pos != arm1Target ||
+    arm2Pos != arm2Target
+  ) {
+
+    if (basePos < baseTarget) basePos++;
+    if (basePos > baseTarget) basePos--;
+
+    if (arm1Pos < arm1Target) arm1Pos++;
+    if (arm1Pos > arm1Target) arm1Pos--;
+
+    if (arm2Pos < arm2Target) arm2Pos++;
+    if (arm2Pos > arm2Target) arm2Pos--;
+
+    baseServo.write(basePos);
+    arm1Servo.write(arm1Pos);
+    arm2Servo.write(arm2Pos);
+
+    delay(MOVE_DELAY);
+  }
+}
+
+
+// ============================================================
+// PICKUP SEQUENCE
+// ============================================================
+
+void pickup(
+  int baseTarget,
+  int arm1Target,
+  int arm2Target
+) {
+
+  Serial.println("PICKUP_START");
+
+  // --------------------------------
+  // 1. Move above target
+  // --------------------------------
+
+  Serial.println("MOVING_TO_TARGET");
+
+  moveArm(
+    baseTarget,
+    arm1Target,
+    arm2Target
+  );
+
+  delay(300);
+
+
+  // --------------------------------
+  // 2. Open claw
+  // --------------------------------
+
+  Serial.println("OPENING_CLAW");
+
+  moveServoSlow(
+    clawServo,
+    clawPos,
+    90,
+    CLAW_MIN,
+    CLAW_MAX
+  );
+
+  delay(300);
+
+
+  // --------------------------------
+  // 3. Lower arm
+  //
+  // For now this is represented by
+  // moving arm1/arm2 toward their
+  // lower pickup configuration.
+  // --------------------------------
+
+  Serial.println("LOWERING");
+
+  int lowerArm1 = constrain(
+    arm1Target - 25,
+    ARM1_MIN,
+    ARM1_MAX
+  );
+
+  int lowerArm2 = constrain(
+    arm2Target + 25,
+    ARM2_MIN,
+    ARM2_MAX
+  );
+
+  moveArm(
+    baseTarget,
+    lowerArm1,
+    lowerArm2
+  );
+
+  delay(500);
+
+
+  // --------------------------------
+  // 4. Close claw
+  // --------------------------------
+
+  Serial.println("CLOSING_CLAW");
+
+  moveServoSlow(
+    clawServo,
+    clawPos,
+    0,
+    CLAW_MIN,
+    CLAW_MAX
+  );
+
+  delay(500);
+
+
+  // --------------------------------
+  // 5. Raise arm
+  // --------------------------------
+
+  Serial.println("RAISING");
+
+  moveArm(
+    baseTarget,
+    arm1Target,
+    arm2Target
+  );
+
+  delay(500);
+
+
+  Serial.println("PICKUP_COMPLETE");
+}
+
+
+// ============================================================
+// RESET POSITION
+// ============================================================
+
+void resetArm() {
+
+  Serial.println("RESETTING");
+
+  moveServoSlow(
+    clawServo,
+    clawPos,
+    0,
+    CLAW_MIN,
+    CLAW_MAX
+  );
+
+  moveArm(
+    90,
+    90,
+    90
+  );
+
+  Serial.println("RESET_COMPLETE");
+}
+
+
+// ============================================================
+// SERIAL COMMAND PROCESSING
+// ============================================================
+
+void processCommand(String command) {
+
+  command.trim();
+
+  // --------------------------------
+  // RESET
+  // --------------------------------
+
+  if (command == "RESET") {
+
+    resetArm();
+    return;
+  }
+
+
+  // --------------------------------
+  // OPEN
+  // --------------------------------
+
+  if (command == "OPEN") {
+
+    moveServoSlow(
+      clawServo,
+      clawPos,
+      90,
+      CLAW_MIN,
+      CLAW_MAX
+    );
+
+    Serial.println("CLAW_OPEN");
+
+    return;
+  }
+
+
+  // --------------------------------
+  // CLOSE
+  // --------------------------------
+
+  if (command == "CLOSE") {
+
+    moveServoSlow(
+      clawServo,
+      clawPos,
+      0,
+      CLAW_MIN,
+      CLAW_MAX
+    );
+
+    Serial.println("CLAW_CLOSED");
+
+    return;
+  }
+
+
+  // --------------------------------
+  // STATUS
+  // --------------------------------
+
+  if (command == "STATUS") {
+
+    Serial.print("BASE=");
+    Serial.println(basePos);
+
+    Serial.print("ARM1=");
+    Serial.println(arm1Pos);
+
+    Serial.print("ARM2=");
+    Serial.println(arm2Pos);
+
+    Serial.print("CLAW=");
+    Serial.println(clawPos);
+
+    return;
+  }
+
+
+  // --------------------------------
+  // PICKUP:b:a1:a2
+  //
+  // Example:
+  // PICKUP:90:75:60
+  // --------------------------------
+
+  if (command.startsWith("PICKUP:")) {
+
+    int first = command.indexOf(':');
+    int second = command.indexOf(':', first + 1);
+    int third = command.indexOf(':', second + 1);
+
+    if (
+      first != -1 &&
+      second != -1 &&
+      third != -1
+    ) {
+
+      int baseTarget =
+        command.substring(
+          first + 1,
+          second
+        ).toInt();
+
+      int arm1Target =
+        command.substring(
+          second + 1,
+          third
+        ).toInt();
+
+      int arm2Target =
+        command.substring(
+          third + 1
+        ).toInt();
+
+      pickup(
+        baseTarget,
+        arm1Target,
+        arm2Target
+      );
+
+    } else {
+
+      Serial.println("ERROR:BAD_PICKUP_COMMAND");
+    }
+
+    return;
+  }
+
+
+  Serial.println("ERROR:UNKNOWN_COMMAND");
+}
+
+
+// ============================================================
+// SETUP
+// ============================================================
+
+void setup() {
+
+  Serial.begin(115200);
+
+  baseServo.attach(BASE_PIN);
+  arm1Servo.attach(ARM1_PIN);
+  arm2Servo.attach(ARM2_PIN);
+  clawServo.attach(CLAW_PIN);
+
+  // Initial positions
+  baseServo.write(basePos);
+  arm1Servo.write(arm1Pos);
+  arm2Servo.write(arm2Pos);
+  clawServo.write(clawPos);
+
+  delay(1000);
+
+  Serial.println("ATLAS_R4_ARM_READY");
+  Serial.println("BASE=90");
+  Serial.println("ARM1=90");
+  Serial.println("ARM2=90");
+  Serial.println("CLAW=0");
+}
+
+
+// ============================================================
+// LOOP
+// ============================================================
+
+void loop() {
+
+  if (Serial.available()) {
+
+    String command =
+      Serial.readStringUntil('\n');
+
+    processCommand(command);
+  }
+}
