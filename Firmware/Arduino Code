@@ -1,428 +1,201 @@
+#include <Arduino.h>
 #include <Servo.h>
 
-// =============================
-// SERVO PINS
-// =============================
-const int BASE_PIN = 9;
-const int ARM1_PIN = 10;
-const int ARM2_PIN = 11;
-const int CLAW_PIN = 6;
+// Servo pin mappings
+const int clawPin = 6;
+const int basePin = 9;
+const int arm1Pin = 10;
+const int arm2Pin = 11;
 
-// =============================
-// SERVOS
-// =============================
+// Create servo objects
+Servo clawServo;
 Servo baseServo;
 Servo arm1Servo;
 Servo arm2Servo;
-Servo clawServo;
 
-// =============================
-// CURRENT POSITIONS
-// =============================
-int basePos = 90;
-int arm1Pos = 90;
-int arm2Pos = 90;
-int clawPos = 0;
-
-// =============================
-// LIMITS
-// =============================
-const int BASE_MIN = 0;
-const int BASE_MAX = 180;
-
-const int ARM1_MIN = 0;
-const int ARM1_MAX = 130;
-
-const int ARM2_MIN = 0;
-const int ARM2_MAX = 130;
-
-const int CLAW_MIN = 0;
-const int CLAW_MAX = 90;
-
-// =============================
-// MOVEMENT SPEED
-// Smaller = faster
-// =============================
-const int MOVE_DELAY = 15;
-
-
-// ============================================================
-// SAFELY MOVE A SERVO
-// ============================================================
-
-void moveServoSlow(
-  Servo &servo,
-  int &current,
-  int target,
-  int minimum,
-  int maximum
-) {
-
-  target = constrain(target, minimum, maximum);
-
-  while (current != target) {
-
-    if (current < target) {
-      current++;
-    } else {
-      current--;
-    }
-
-    servo.write(current);
-
-    delay(MOVE_DELAY);
-  }
-}
-
-
-// ============================================================
-// MOVE ALL ARM JOINTS
-// ============================================================
-
-void moveArm(int baseTarget, int arm1Target, int arm2Target) {
-
-  baseTarget = constrain(baseTarget, BASE_MIN, BASE_MAX);
-  arm1Target = constrain(arm1Target, ARM1_MIN, ARM1_MAX);
-  arm2Target = constrain(arm2Target, ARM2_MIN, ARM2_MAX);
-
-  // Move gradually toward the target.
-  while (
-    basePos != baseTarget ||
-    arm1Pos != arm1Target ||
-    arm2Pos != arm2Target
-  ) {
-
-    if (basePos < baseTarget) basePos++;
-    if (basePos > baseTarget) basePos--;
-
-    if (arm1Pos < arm1Target) arm1Pos++;
-    if (arm1Pos > arm1Target) arm1Pos--;
-
-    if (arm2Pos < arm2Target) arm2Pos++;
-    if (arm2Pos > arm2Target) arm2Pos--;
-
-    baseServo.write(basePos);
-    arm1Servo.write(arm1Pos);
-    arm2Servo.write(arm2Pos);
-
-    delay(MOVE_DELAY);
-  }
-}
-
-
-// ============================================================
-// PICKUP SEQUENCE
-// ============================================================
-
-void pickup(
-  int baseTarget,
-  int arm1Target,
-  int arm2Target
-) {
-
-  Serial.println("PICKUP_START");
-
-  // --------------------------------
-  // 1. Move above target
-  // --------------------------------
-
-  Serial.println("MOVING_TO_TARGET");
-
-  moveArm(
-    baseTarget,
-    arm1Target,
-    arm2Target
-  );
-
-  delay(300);
-
-
-  // --------------------------------
-  // 2. Open claw
-  // --------------------------------
-
-  Serial.println("OPENING_CLAW");
-
-  moveServoSlow(
-    clawServo,
-    clawPos,
-    90,
-    CLAW_MIN,
-    CLAW_MAX
-  );
-
-  delay(300);
-
-
-  // --------------------------------
-  // 3. Lower arm
-  //
-  // For now this is represented by
-  // moving arm1/arm2 toward their
-  // lower pickup configuration.
-  // --------------------------------
-
-  Serial.println("LOWERING");
-
-  int lowerArm1 = constrain(
-    arm1Target - 25,
-    ARM1_MIN,
-    ARM1_MAX
-  );
-
-  int lowerArm2 = constrain(
-    arm2Target + 25,
-    ARM2_MIN,
-    ARM2_MAX
-  );
-
-  moveArm(
-    baseTarget,
-    lowerArm1,
-    lowerArm2
-  );
-
-  delay(500);
-
-
-  // --------------------------------
-  // 4. Close claw
-  // --------------------------------
-
-  Serial.println("CLOSING_CLAW");
-
-  moveServoSlow(
-    clawServo,
-    clawPos,
-    0,
-    CLAW_MIN,
-    CLAW_MAX
-  );
-
-  delay(500);
-
-
-  // --------------------------------
-  // 5. Raise arm
-  // --------------------------------
-
-  Serial.println("RAISING");
-
-  moveArm(
-    baseTarget,
-    arm1Target,
-    arm2Target
-  );
-
-  delay(500);
-
-
-  Serial.println("PICKUP_COMPLETE");
-}
-
-
-// ============================================================
-// RESET POSITION
-// ============================================================
-
-void resetArm() {
-
-  Serial.println("RESETTING");
-
-  moveServoSlow(
-    clawServo,
-    clawPos,
-    0,
-    CLAW_MIN,
-    CLAW_MAX
-  );
-
-  moveArm(
-    90,
-    90,
-    90
-  );
-
-  Serial.println("RESET_COMPLETE");
-}
-
-
-// ============================================================
-// SERIAL COMMAND PROCESSING
-// ============================================================
-
-void processCommand(String command) {
-
-  command.trim();
-
-  // --------------------------------
-  // RESET
-  // --------------------------------
-
-  if (command == "RESET") {
-
-    resetArm();
-    return;
-  }
-
-
-  // --------------------------------
-  // OPEN
-  // --------------------------------
-
-  if (command == "OPEN") {
-
-    moveServoSlow(
-      clawServo,
-      clawPos,
-      90,
-      CLAW_MIN,
-      CLAW_MAX
-    );
-
-    Serial.println("CLAW_OPEN");
-
-    return;
-  }
-
-
-  // --------------------------------
-  // CLOSE
-  // --------------------------------
-
-  if (command == "CLOSE") {
-
-    moveServoSlow(
-      clawServo,
-      clawPos,
-      0,
-      CLAW_MIN,
-      CLAW_MAX
-    );
-
-    Serial.println("CLAW_CLOSED");
-
-    return;
-  }
-
-
-  // --------------------------------
-  // STATUS
-  // --------------------------------
-
-  if (command == "STATUS") {
-
-    Serial.print("BASE=");
-    Serial.println(basePos);
-
-    Serial.print("ARM1=");
-    Serial.println(arm1Pos);
-
-    Serial.print("ARM2=");
-    Serial.println(arm2Pos);
-
-    Serial.print("CLAW=");
-    Serial.println(clawPos);
-
-    return;
-  }
-
-
-  // --------------------------------
-  // PICKUP:b:a1:a2
-  //
-  // Example:
-  // PICKUP:90:75:60
-  // --------------------------------
-
-  if (command.startsWith("PICKUP:")) {
-
-    int first = command.indexOf(':');
-    int second = command.indexOf(':', first + 1);
-    int third = command.indexOf(':', second + 1);
-
-    if (
-      first != -1 &&
-      second != -1 &&
-      third != -1
-    ) {
-
-      int baseTarget =
-        command.substring(
-          first + 1,
-          second
-        ).toInt();
-
-      int arm1Target =
-        command.substring(
-          second + 1,
-          third
-        ).toInt();
-
-      int arm2Target =
-        command.substring(
-          third + 1
-        ).toInt();
-
-      pickup(
-        baseTarget,
-        arm1Target,
-        arm2Target
-      );
-
-    } else {
-
-      Serial.println("ERROR:BAD_PICKUP_COMMAND");
-    }
-
-    return;
-  }
-
-
-  Serial.println("ERROR:UNKNOWN_COMMAND");
-}
-
-
-// ============================================================
-// SETUP
-// ============================================================
+// Global variables for target coordinates
+float targetX = 0.0;
+float targetY = 0.0;
+float targetZ = 0.0;
+
+// Robot arm link lengths (adjust these to match your physical arm dimensions in mm)
+const float L1 = 135.0; // Length of arm segment 1
+const float L2 = 100.0; // Length of arm segment 2
+
+// Function declarations
+void parseCommand(String command);
+void executeMoveSequence(float x, float y, float z);
+bool calculateIK(float x, float y, float z, int &baseAngle, int &arm1Angle, int &arm2Angle);
+void moveArmSmoothly(int targetBase, int targetArm1, int targetArm2, int speedDelay);
 
 void setup() {
-
+  // Initialize Serial communication matching the Python script baud rate
   Serial.begin(115200);
+  while (!Serial) {
+    ; // Wait for serial port to connect
+  }
+  
+  // Attach all servos immediately so they hold position and never go limp
+  clawServo.attach(clawPin);
+  baseServo.attach(basePin);
+  arm1Servo.attach(arm1Pin);
+  arm2Servo.attach(arm2Pin);
 
-  baseServo.attach(BASE_PIN);
-  arm1Servo.attach(ARM1_PIN);
-  arm2Servo.attach(ARM2_PIN);
-  clawServo.attach(CLAW_PIN);
+  // Set initial safe starting positions
+  clawServo.write(0); // Start closed
+  baseServo.write(90);
+  arm1Servo.write(90);
+  arm2Servo.write(0);
 
-  // Initial positions
-  baseServo.write(basePos);
-  arm1Servo.write(arm1Pos);
-  arm2Servo.write(arm2Pos);
-  clawServo.write(clawPos);
-
-  delay(1000);
-
-  Serial.println("ATLAS_R4_ARM_READY");
-  Serial.println("BASE=90");
-  Serial.println("ARM1=90");
-  Serial.println("ARM2=90");
-  Serial.println("CLAW=0");
+  Serial.println("Arduino R4 Ready. All servos attached and holding position.");
 }
 
-
-// ============================================================
-// LOOP
-// ============================================================
-
 void loop() {
+  // Check if data is available on the serial port
+  if (Serial.available() > 0) {
+    String incomingCommand = Serial.readStringUntil('\n');
+    incomingCommand.trim(); // Remove surrounding whitespace/newlines
 
-  if (Serial.available()) {
+    if (incomingCommand.length() > 0) {
+      Serial.print("Received: ");
+      Serial.println(incomingCommand);
 
-    String command =
-      Serial.readStringUntil('\n');
-
-    processCommand(command);
+      // Check if the command starts with "MOVE"
+      if (incomingCommand.startsWith("MOVE ")) {
+        parseCommand(incomingCommand);
+      } else {
+        Serial.println("UNKNOWN COMMAND");
+      }
+    }
   }
+}
+
+// Parses the "MOVE X Y Z" string (Pi already applied the -40mm X offset)
+void parseCommand(String command) {
+  int firstSpace = command.indexOf(' ');
+  int secondSpace = command.indexOf(' ', firstSpace + 1);
+  int thirdSpace = command.indexOf(' ', secondSpace + 1);
+
+  if (firstSpace != -1 && secondSpace != -1) {
+    String xStr = command.substring(firstSpace + 1, secondSpace);
+    
+    String yStr;
+    if (thirdSpace != -1) {
+      yStr = command.substring(secondSpace + 1, thirdSpace);
+      String zStr = command.substring(thirdSpace + 1);
+      targetZ = zStr.toFloat();
+    } else {
+      yStr = command.substring(secondSpace + 1);
+      targetZ = 0.0; 
+    }
+
+    targetX = xStr.toFloat();
+    targetY = yStr.toFloat();
+
+    // Print parsed coordinates for debugging
+    Serial.print("Target Received -> X (Compensated): ");
+    Serial.print(targetX);
+    Serial.print(" mm | Y: ");
+    Serial.print(targetY);
+    Serial.print(" mm | Z: ");
+    Serial.print(targetZ);
+    Serial.println(" mm");
+
+    // Execute the robot arm pickup sequence
+    executeMoveSequence(targetX, targetY, targetZ);
+
+  } else {
+    Serial.println("ERROR: Invalid MOVE format syntax.");
+  }
+}
+
+// Inverse Kinematics calculation helper
+bool calculateIK(float x, float y, float z, int &baseAngle, int &arm1Angle, int &arm2Angle) {
+  // 1. Base rotation angle (atan2 of X and Y)
+  float baseRad = atan2(x, y);
+  baseAngle = degrees(baseRad) + 90; // Offset center if needed
+
+  // 2. Planar distance (r) and height (z) for 2D arm calculation
+  float r = sqrt(x * x + y * y);
+  float distSq = r * r + z * z;
+  float dist = sqrt(distSq);
+
+  // Check if target is out of reach
+  if (dist > (L1 + L2) || dist < abs(L1 - L2)) {
+    return false; // Out of reach
+  }
+
+  // Law of cosines for arm joints
+  float cosTheta2 = (distSq - (L1 * L1 + L2 * L2)) / (2.0 * L1 * L2);
+  float sinTheta2 = sqrt(1.0 - cosTheta2 * cosTheta2);
+  float theta2 = atan2(sinTheta2, cosTheta2);
+
+  float theta1 = atan2(z, r) - atan2(L2 * sinTheta2, L1 + L2 * cosTheta2);
+
+  arm1Angle = degrees(theta1);
+  arm2Angle = degrees(theta2);
+
+  // Constrain to valid servo ranges (0-180)
+  baseAngle = constrain(baseAngle, 0, 180);
+  arm1Angle = constrain(arm1Angle, 0, 180);
+  arm2Angle = constrain(arm2Angle, 0, 180);
+
+  return true;
+}
+
+// Helper to move all active arm servos smoothly together
+void moveArmSmoothly(int targetBase, int targetArm1, int targetArm2, int speedDelay) {
+  int currentBase = baseServo.read();
+  int currentArm1 = arm1Servo.read();
+  int currentArm2 = arm2Servo.read();
+
+  // Find the maximum steps needed so all joints finish moving together
+  int maxSteps = max(max(abs(targetBase - currentBase), abs(targetArm1 - currentArm1)), abs(targetArm2 - currentArm2));
+
+  for (int i = 1; i <= maxSteps; i++) {
+    int b = round(currentBase + (targetBase - currentBase) * ((float)i / maxSteps));
+    int a1 = round(currentArm1 + (targetArm1 - currentArm1) * ((float)i / maxSteps));
+    int a2 = round(currentArm2 + (targetArm2 - currentArm2) * ((float)i / maxSteps));
+
+    baseServo.write(b);
+    arm1Servo.write(a1);
+    arm2Servo.write(a2);
+    delay(speedDelay); // Controls movement smoothness speed (lower = faster, higher = slower)
+  }
+}
+
+// Hardware control logic for your robot arm
+void executeMoveSequence(float x, float y, float z) {
+  Serial.println("--- Starting Pickup Sequence ---");
+
+  // 0. Ensure the claw is open before approaching the object
+  Serial.println("Opening claw...");
+  clawServo.write(180); 
+  delay(500);
+
+  // Calculate IK angles for the target (X, Y, Z)
+  int bAngle = 90, a1Angle = 90, a2Angle = 90;
+  if (calculateIK(x, y, z, bAngle, a1Angle, a2Angle)) {
+    Serial.println("IK Solved. Moving smoothly to target coordinates...");
+    
+    // 1. Smoothly move base and arm to target position
+    moveArmSmoothly(bAngle, a1Angle, a2Angle, 15); // Adjust '15' for faster/slower movement speed
+
+  } else {
+    Serial.println("ERROR: Target coordinates are out of reach!");
+    return;
+  }
+
+  // 2. Close the claw to grab the object
+  Serial.println("Closing claw...");
+  clawServo.write(0); 
+  
+  // Wait a full second after the claw closes to secure the grip
+  delay(1000); 
+
+  // 3. Lift back up smoothly with the object (e.g., return arm1/arm2 to neutral 90°)
+  Serial.println("Lifting object...");
+  moveArmSmoothly(bAngle, 90, 90, 15);
+
+  Serial.println("--- Sequence Complete ---");
 }
