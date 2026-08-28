@@ -19,7 +19,7 @@ float targetY = 0.0;
 float targetZ = 0.0;
 
 // Robot arm link lengths (adjust these to match your physical arm dimensions in mm)
-const float L1 = 135.0; // Length of arm segment 1
+const float L1 = 130; // Length of arm segment 1
 const float L2 = 100.0; // Length of arm segment 2
 
 // Function declarations
@@ -42,7 +42,7 @@ void setup() {
   arm2Servo.attach(arm2Pin);
 
   // Set initial safe starting positions
-  clawServo.write(0); // Start closed
+  clawServo.write(90); // Start open
   baseServo.write(90);
   arm1Servo.write(90);
   arm2Servo.write(0);
@@ -86,7 +86,7 @@ void parseCommand(String command) {
       targetZ = zStr.toFloat();
     } else {
       yStr = command.substring(secondSpace + 1);
-      targetZ = 0.0; 
+      targetZ = -10;
     }
 
     targetX = xStr.toFloat();
@@ -170,7 +170,7 @@ void executeMoveSequence(float x, float y, float z) {
 
   // 0. Ensure the claw is open before approaching the object
   Serial.println("Opening claw...");
-  clawServo.write(180); 
+  clawServo.write(90); 
   delay(500);
 
   // Calculate IK angles for the target (X, Y, Z)
