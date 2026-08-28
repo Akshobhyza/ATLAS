@@ -49,6 +49,8 @@ try:
     )
 
     time.sleep(2)
+    r4.reset_input_buffer()
+    r4.reset_output_buffer()
 
     print("R4 connected on", SERIAL_PORT)
 
@@ -65,13 +67,12 @@ def send_to_r4(command):
         return False
 
     try:
-        message = command + "\n"
+        message = command.strip() + "\n"
 
-        r4.write(
-            message.encode("utf-8")
-        )
-
+        r4.write(message.encode("utf-8"))
         r4.flush()
+        
+        time.sleep(0.05)
 
         print("R4 <-", command)
 
@@ -79,6 +80,12 @@ def send_to_r4(command):
 
     except Exception as e:
         print("R4 SERIAL ERROR:", e)
+        try:
+            r4.close()
+            r4.open()
+            time.sleep(2)
+        except:
+            pass
 
         return False
 
@@ -90,15 +97,7 @@ def send_to_r4(command):
 lock = threading.Lock()
 
 latest_jpeg = None
-background = None
-
-live_candidates = []
-
-last_analyzed_candidates = []
-
-selected_candidate = None
-
-calibration_distance = None
+live_detections = []
 
 
 # ============================================================
@@ -127,7 +126,6 @@ def capture_frame():
 # ============================================================
 
 def get_center_camera_x(camera_y):
-    # Adjust center points if needed based on your calibration
     points = [
         (103.0, 339.0),
         (183.0, 328.0),
@@ -164,33 +162,33 @@ def get_center_camera_x(camera_y):
 
 
 def estimate_robot_y(camera_y):
-    # Calibrated points: [Far Pixel, Close Pixel] -> [Far Robot Y (mm), Close Robot Y (mm)]
     camera_points = np.array(
         [
-            103.0,  # Far (10 inches)
-            263.0   # Close (6 inches)
+            100.0,  # Top of your workspace view
+            400.0   # Bottom of your workspace view
         ],
         dtype=float
     )
 
     robot_points = np.array(
         [
-            254.0,  # 10 inches in mm
-            152.4   # 6 inches in mm
+            200.0,  # Max Y distance
+            120.0   # Min Y distance
         ],
         dtype=float
     )
 
-    base_y = float(
+    robot_y = float(
         np.interp(
             camera_y,
             camera_points,
-            robot_points
+            robot_points,
+            left=200.0,
+            right=120.0
         )
     )
 
-    # Added +30 mm offset as requested
-    return base_y + 30.0
+    return max(120.0, min(200.0, robot_y))
 
 
 def estimate_robot_x(
@@ -202,10 +200,9 @@ def estimate_robot_x(
     )
 
     pixel_offset = (
-        camera_x - center_x
+        center_x - camera_x
     )
 
-    # Simplified pixel-to-mm scaling offset
     pixels_per_mm = 3.5
 
     x_offset_mm = pixel_offset / pixels_per_mm
@@ -242,106 +239,36 @@ def camera_to_robot(
 
 
 # ============================================================
-# BACKGROUND
+# MANUAL REFERENCE CAPTURE BACKGROUND SUBTRACTION
 # ============================================================
 
-def make_background():
-    global background
+stored_background = None
 
-    frames = []
+def set_background_reference(frame):
+    global stored_background
+    stored_background = cv2.GaussianBlur(frame.astype(np.float32), (11, 11), 0)
+    print("New empty background reference captured.")
 
-    print("Capturing background...")
-
-    for i in range(10):
-        frame = capture_frame()
-
-        frame = cv2.GaussianBlur(
-            frame,
-            (9, 9),
-            0
-        )
-
-        frames.append(
-            frame.astype(
-                np.float32
-            )
-        )
-
-        time.sleep(0.05)
-
-    background = np.median(
-        np.stack(frames),
-        axis=0
-    ).astype(np.uint8)
-
-    print("Background captured.")
-
-    return True
-
-
-# ============================================================
-# DETECTION
-# ============================================================
 
 def detect_objects(frame):
-    if background is None:
-        return []
+    global stored_background
 
-    current = cv2.GaussianBlur(
-        frame,
-        (9, 9),
-        0
-    )
+    if stored_background is None:
+        stored_background = cv2.GaussianBlur(frame.astype(np.float32), (11, 11), 0)
 
-    bg = cv2.GaussianBlur(
-        background,
-        (9, 9),
-        0
-    )
+    current_blur = cv2.GaussianBlur(frame.astype(np.float32), (11, 11), 0)
+    
+    diff = cv2.absdiff(current_blur, stored_background)
+    diff_gray = cv2.cvtColor(diff.astype(np.uint8), cv2.COLOR_BGR2GRAY)
 
-    diff = cv2.absdiff(
-        current,
-        bg
-    )
-
-    gray = cv2.cvtColor(
-        diff,
-        cv2.COLOR_BGR2GRAY
-    )
-
-    _, mask = cv2.threshold(
-        gray,
-        30,
-        255,
-        cv2.THRESH_BINARY
-    )
-
-    kernel_small = np.ones(
-        (7, 7),
-        np.uint8
-    )
-
-    mask = cv2.morphologyEx(
-        mask,
-        cv2.MORPH_OPEN,
-        kernel_small,
-        iterations=1
-    )
-
-    kernel_large = np.ones(
-        (13, 13),
-        np.uint8
-    )
-
-    mask = cv2.morphologyEx(
-        mask,
-        cv2.MORPH_CLOSE,
-        kernel_large,
-        iterations=2
-    )
+    _, thresh = cv2.threshold(diff_gray, 45, 255, cv2.THRESH_BINARY)
+    
+    kernel = np.ones((7, 7), np.uint8)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=1)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=2)
 
     contours, _ = cv2.findContours(
-        mask,
+        thresh,
         cv2.RETR_EXTERNAL,
         cv2.CHAIN_APPROX_SIMPLE
     )
@@ -349,46 +276,18 @@ def detect_objects(frame):
     results = []
 
     for contour in contours:
-        area = cv2.contourArea(
-            contour
-        )
+        area = cv2.contourArea(contour)
 
-        if area < 300:
+        if area < 300 or area > 60000:
             continue
 
-        if area > 120000:
-            continue
+        x, y, w, h = cv2.boundingRect(contour)
 
-        x, y, w, h = cv2.boundingRect(
-            contour
-        )
-
-        if w < 12 or h < 12:
-            continue
-
-        rect_area = w * h
-
-        if rect_area <= 0:
-            continue
-
-        fill = (
-            area /
-            rect_area
-        )
-
-        if fill < 0.08:
-            continue
-
-        aspect = max(
-            w / h,
-            h / w
-        )
-
-        if aspect > 12:
+        if w < 15 or h < 15:
             continue
 
         cx = x + w // 2
-        cy = y + h // 2
+        contact_y = y + h
 
         results.append({
             "x": int(x),
@@ -397,211 +296,53 @@ def detect_objects(frame):
             "h": int(h),
             "area": int(area),
             "cx": int(cx),
-            "cy": int(cy),
-            "fill": float(fill)
+            "cy": int(contact_y)
         })
 
-    results.sort(
-        key=lambda item: item["area"],
-        reverse=True
-    )
+    results.sort(key=lambda item: item["area"], reverse=True)
 
-    return results[:15]
-
-
-# ============================================================
-# MULTI-FRAME ANALYSIS
-# ============================================================
-
-def analyze_fresh_frames():
-    all_detections = []
-
-    print()
-    print("Analyzing fresh frames...")
-
-    for i in range(5):
-        frame = capture_frame()
-
-        detections = detect_objects(
-            frame
-        )
-
-        print(
-            f"Analysis frame {i}: "
-            f"{len(detections)} candidates"
-        )
-
-        all_detections.extend(
-            detections
-        )
-
-        time.sleep(0.05)
-
-    if not all_detections:
-        print("No candidates found.")
-
-        return []
-
-    groups = []
-
-    for detection in all_detections:
-        matched = False
-
-        for group in groups:
-            gx = group[0]["cx"]
-            gy = group[0]["cy"]
-
-            distance = (
-                (
-                    detection["cx"] - gx
-                ) ** 2
-                +
-                (
-                    detection["cy"] - gy
-                ) ** 2
-            ) ** 0.5
-
-            if distance < 50:
-                group.append(
-                    detection
-                )
-
-                matched = True
-
-                break
-
-        if not matched:
-            groups.append(
-                [detection]
-            )
-
-    final = []
-
-    for group in groups:
-        if len(group) < 2:
-            continue
-
-        cx = int(
-            np.mean(
-                [
-                    x["cx"]
-                    for x in group
-                ]
-            )
-        )
-
-        cy = int(
-            np.mean(
-                [
-                    x["cy"]
-                    for x in group
-                ]
-            )
-        )
-
-        w = int(
-            np.mean(
-                [
-                    x["w"]
-                    for x in group
-                ]
-            )
-        )
-
-        h = int(
-            np.mean(
-                [
-                    x["h"]
-                    for x in group
-                ]
-            )
-        )
-
-        area = int(
-            np.mean(
-                [
-                    x["area"]
-                    for x in group
-                ]
-            )
-        )
-
-        fill = float(
-            np.mean(
-                [
-                    x["fill"]
-                    for x in group
-                ]
-            )
-        )
-
-        final.append({
-            "x": cx - w // 2,
-            "y": cy - h // 2,
-            "w": w,
-            "h": h,
-            "area": area,
-            "cx": cx,
-            "cy": cy,
-            "fill": fill,
-            "hits": len(group)
-        })
-
-    final.sort(
-        key=lambda item: item["area"],
-        reverse=True
-    )
-
-    return final[:10]
+    return results[:5]
 
 
 # ============================================================
 # DRAW LIVE FEED
 # ============================================================
 
-def draw_live(
-    frame,
-    detections
-):
+def draw_live(frame, detections):
     output = frame.copy()
 
-    for i, detection in enumerate(
-        detections
-    ):
+    for i, detection in enumerate(detections):
         x = detection["x"]
         y = detection["y"]
         w = detection["w"]
         h = detection["h"]
 
+        color = (0, 255, 0) if i == 0 else (0, 0, 255)
+
         cv2.rectangle(
             output,
             (x, y),
             (x + w, y + h),
-            (0, 255, 0),
+            color,
             2
         )
 
         cv2.circle(
             output,
-            (
-                detection["cx"],
-                detection["cy"]
-            ),
+            (detection["cx"], detection["cy"]),
             5,
-            (0, 255, 0),
+            color,
             -1
         )
 
+        label = "Target" if i == 0 else f"Obj {i}"
         cv2.putText(
             output,
-            str(i),
-            (
-                x,
-                max(20, y - 5)
-            ),
+            label,
+            (x, max(20, y - 5)),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (0, 255, 0),
+            0.6,
+            color,
             2
         )
 
@@ -614,44 +355,25 @@ def draw_live(
 
 def camera_loop():
     global latest_jpeg
-    global live_candidates
+    global live_detections
 
     while True:
         frame = capture_frame()
-
-        if background is not None:
-            detections = detect_objects(
-                frame
-            )
-
-        else:
-            detections = []
-
-        output = draw_live(
-            frame,
-            detections
-        )
+        detections = detect_objects(frame)
+        output = draw_live(frame, detections)
 
         success, encoded = cv2.imencode(
             ".jpg",
             output,
-            [
-                cv2.IMWRITE_JPEG_QUALITY,
-                75
-            ]
+            [cv2.IMWRITE_JPEG_QUALITY, 75]
         )
 
         if success:
             with lock:
-                latest_jpeg = (
-                    encoded.tobytes()
-                )
+                latest_jpeg = encoded.tobytes()
+                live_detections = detections
 
-                live_candidates = (
-                    detections
-                )
-
-        time.sleep(0.02)
+        time.sleep(0.03)
 
 
 # ============================================================
@@ -659,11 +381,13 @@ def camera_loop():
 # ============================================================
 
 def video_stream():
+    last_frame = None
     while True:
         with lock:
             frame = latest_jpeg
 
-        if frame is not None:
+        if frame is not None and frame != last_frame:
+            last_frame = frame
             yield (
                 b"--frame\r\n"
                 b"Content-Type: image/jpeg\r\n\r\n"
@@ -671,7 +395,7 @@ def video_stream():
                 + b"\r\n"
             )
 
-        time.sleep(0.03)
+        time.sleep(0.01)
 
 
 # ============================================================
@@ -682,7 +406,7 @@ HTML = """
 <!DOCTYPE html>
 <html>
 <head>
-<title>Atlas Arm Test</title>
+<title>Atlas Arm Control</title>
 <style>
 body {
     background: #111;
@@ -708,32 +432,24 @@ button {
     border-radius: 5px;
     cursor: pointer;
 }
-.background {
-    background: #2878c8;
+.bg-btn {
+    background: #0d6efd;
     color: white;
-}
-.analyze {
-    background: #198754;
-    color: white;
+    font-weight: bold;
 }
 .select {
-    background: #dc3545;
+    background: #198754;
     color: white;
+    font-weight: bold;
 }
-input {
-    padding: 10px;
-    font-size: 17px;
-    width: 120px;
+.release {
+    background: #ffc107;
+    color: black;
+    font-weight: bold;
 }
 #status {
     margin: 20px;
     font-size: 18px;
-}
-.candidate {
-    background: #222;
-    margin: 10px;
-    padding: 15px;
-    border-radius: 8px;
 }
 .coordinate {
     background: #183d25;
@@ -743,7 +459,7 @@ input {
     font-size: 20px;
 }
 .warning {
-    background: #553300;
+    background: #223322;
     padding: 15px;
     margin: 15px;
     border-radius: 8px;
@@ -752,114 +468,79 @@ input {
 </head>
 <body>
 <div class="container">
-<h1>Atlas Arm Position Test</h1>
+<h1>Atlas Arm Smart Tracking</h1>
 <div class="warning">
-<b>POSITIONING TEST ONLY</b>
+<b>BACKGROUND REFERENCE LOCK</b>
 <br>
-The arm will move to the calculated position.
-<br>
-Rest position: Whole arm pointing straight up.
+Clear the workspace, then click <b>Capture Empty Background</b>. After that, place your object down.
 </div>
 <img id="camera" src="/video_feed">
 <br>
-<button class="background" onclick="captureBackground()">CAPTURE EMPTY BACKGROUND</button>
+<button class="bg-btn" onclick="captureBackground()">1. CAPTURE EMPTY BACKGROUND</button>
 <br>
-<input id="distance" type="number" placeholder="Distance mm">
-<button class="analyze" onclick="analyzeObject()">ANALYZE OBJECT</button>
-<div id="status">Capture the empty background first.</div>
-<div id="results"></div>
+<button class="select" onclick="moveArmToFirst()">2. GRAB TARGET OBJECT</button>
+<button class="release" onclick="releaseArm()">RELEASE & RESET ARM</button>
+<div id="status">System ready. Capture empty background first.</div>
 <div id="coordinates"></div>
 </div>
 <script>
 async function captureBackground() {
     const status = document.getElementById("status");
-    status.innerHTML = "Capturing background...";
+    status.innerHTML = "Saving empty background reference...";
     try {
-        const response = await fetch("/capture_background", { method: "POST" });
+        const response = await fetch("/capture_bg", { method: "POST" });
         const data = await response.json();
         if (data.success) {
-            status.innerHTML = "Background captured. Place the object down.";
+            status.innerHTML = "Background reference captured! Place your object down.";
         } else {
-            status.innerHTML = "Background capture failed.";
+            status.innerHTML = "Failed to capture background.";
         }
-    } catch (error) {
-        status.innerHTML = "ERROR: " + error;
-    }
-}
-async function analyzeObject() {
-    const distance = document.getElementById("distance").value;
-    if (!distance) {
-        alert("Enter distance in mm first.");
-        return;
-    }
-    const status = document.getElementById("status");
-    const results = document.getElementById("results");
-    status.innerHTML = "Analyzing 5 fresh frames...";
-    results.innerHTML = "";
-    try {
-        const response = await fetch("/analyze?distance=" + encodeURIComponent(distance));
-        const data = await response.json();
-        if (!response.ok) {
-            status.innerHTML = "Server error: " + JSON.stringify(data);
-            return;
-        }
-        if (!data.candidates || data.candidates.length === 0) {
-            status.innerHTML = "No stable objects detected.";
-            return;
-        }
-        status.innerHTML = "Found " + data.candidates.length + " stable candidates.";
-        data.candidates.forEach((candidate, index) => {
-            const div = document.createElement("div");
-            div.className = "candidate";
-            div.innerHTML = `
-                <h3>Candidate ${index}</h3>
-                Center: (${candidate.cx}, ${candidate.cy})
-                <br>
-                Size: ${candidate.w} &times; ${candidate.h}
-                <br>
-                Area: ${candidate.area}
-                <br>
-                Stable frames: ${candidate.hits}
-                <br>
-                <button class="select" onclick="selectObject(${index})">MOVE ARM TO OBJECT</button>
-            `;
-            results.appendChild(div);
-        });
     } catch (error) {
         status.innerHTML = "REQUEST FAILED: " + error;
     }
 }
-async function selectObject(index) {
+async function moveArmToFirst() {
     const status = document.getElementById("status");
-    status.innerHTML = "Calculating position and moving arm...";
+    status.innerHTML = "Moving arm to target...";
     try {
-        const response = await fetch("/select", {
+        const response = await fetch("/move_target", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ index: index })
+            body: JSON.stringify({ index: 0 })
         });
         const data = await response.json();
         if (!data.success) {
-            status.innerHTML = "Selection failed: " + data.error;
+            status.innerHTML = "Move failed: " + data.error;
             return;
         }
-        const candidate = data.candidate;
-        status.innerHTML = "ARM POSITION COMMAND SENT";
+        const target = data.target;
+        status.innerHTML = "ARM COMMAND SENT SUCCESSFULLY";
         document.getElementById("coordinates").innerHTML = `
             <div class="coordinate">
-                <b>OBJECT POSITION</b>
+                <b>TARGET POSITION</b>
                 <br><br>
-                Camera: (${candidate.cx}, ${candidate.cy})
+                Camera: (${target.cx}, ${target.cy})
                 <br><br>
-                Robot X: <b>${candidate.robot_x.toFixed(1)} mm</b>
+                Robot X: <b>${target.robot_x.toFixed(1)} mm</b>
                 <br>
-                Robot Y: <b>${candidate.robot_y.toFixed(1)} mm</b>
-                <br><br>
-                R4 command:
-                <br>
-                <b>MOVE ${candidate.robot_x.toFixed(1)} ${candidate.robot_y.toFixed(1)} 0.0</b>
+                Robot Y: <b>${target.robot_y.toFixed(1)} mm</b>
             </div>
         `;
+    } catch (error) {
+        status.innerHTML = "REQUEST FAILED: " + error;
+    }
+}
+async function releaseArm() {
+    const status = document.getElementById("status");
+    status.innerHTML = "Resetting arm position...";
+    try {
+        const response = await fetch("/release", { method: "POST" });
+        const data = await response.json();
+        if (data.success) {
+            status.innerHTML = "Arm reset command sent.";
+        } else {
+            status.innerHTML = "Reset failed: " + data.error;
+        }
     } catch (error) {
         status.innerHTML = "REQUEST FAILED: " + error;
     }
@@ -887,139 +568,71 @@ def video_feed():
     )
 
 
-@app.route("/capture_background", methods=["POST"])
-def capture_background_route():
+@app.route("/capture_bg", methods=["POST"])
+def capture_bg():
     try:
-        success = make_background()
-        return jsonify({"success": success})
+        frame = capture_frame()
+        set_background_reference(frame)
+        return jsonify({"success": True})
     except Exception as error:
-        print("BACKGROUND ERROR:", repr(error))
         return jsonify({"success": False, "error": str(error)}), 500
 
 
-@app.route("/analyze")
-def analyze():
-    global calibration_distance
-    global last_analyzed_candidates
+@app.route("/move_target", methods=["POST"])
+def move_target():
+    global live_detections
 
     try:
-        distance = float(request.args.get("distance"))
-        calibration_distance = distance
+        with lock:
+            current_detections = list(live_detections)
 
-        print()
-        print("=" * 60)
-        print(f"ANALYZING OBJECT AT {distance} mm")
-        print("=" * 60)
-
-        candidates = analyze_fresh_frames()
-        last_analyzed_candidates = candidates
-
-        print()
-        print(f"FINAL CANDIDATES: {len(candidates)}")
-        for i, candidate in enumerate(candidates):
-            print(
-                f"[{i}] "
-                f"center=({candidate['cx']},{candidate['cy']}) "
-                f"box={candidate['w']}x{candidate['h']} "
-                f"area={candidate['area']} "
-                f"hits={candidate['hits']}"
-            )
-        print("=" * 60)
-
-        return jsonify({
-            "success": True,
-            "distance": distance,
-            "candidates": candidates
-        })
-
-    except Exception as error:
-        print("ANALYZE ERROR:", repr(error))
-        return jsonify({"success": False, "error": str(error)}), 500
-
-
-@app.route("/select", methods=["POST"])
-def select():
-    global selected_candidate
-
-    try:
-        data = request.get_json()
-
-        if data is None:
-            return jsonify({"success": False, "error": "No JSON data received"}), 400
-
-        index = int(data["index"])
-
-        if index < 0 or index >= len(last_analyzed_candidates):
+        if not current_detections:
             return jsonify({
                 "success": False,
-                "error": "Invalid candidate. Analyze again."
+                "error": "No objects detected against the background. Make sure you captured the empty background first."
             }), 400
 
-        selected_candidate = dict(
-            last_analyzed_candidates[index]
-        )
+        target = current_detections[0]
 
-        # ====================================================
-        # CALCULATE ROBOT POSITION
-        # ====================================================
-        robot_x, robot_y = camera_to_robot(
-            selected_candidate["cx"],
-            selected_candidate["cy"]
-        )
-        robot_x -= 40
+        robot_x, robot_y = camera_to_robot(target["cx"], target["cy"])
+        robot_x -= 40  # calibration offset
 
-        selected_candidate["robot_x"] = robot_x
-        selected_candidate["robot_y"] = robot_y
+        target["robot_x"] = robot_x
+        target["robot_y"] = robot_y
 
-        # ====================================================
-        # SAFETY LIMITS FOR TESTING (Adjusted for +30 offset)
-        # ====================================================
-        if abs(robot_x) > 150:
-            print("SAFETY STOP: X position too large:", robot_x)
+        if abs(robot_x) > 150 or robot_y < 50 or robot_y > 400:
             return jsonify({
                 "success": False,
-                "error": "Object is outside the safe X test range."
+                "error": "Detected object is out of safe physical reach bounds."
             }), 400
 
-        if robot_y < 50:
-            print("SAFETY STOP: Y position too close:", robot_y)
-            return jsonify({
-                "success": False,
-                "error": "Object is too close for the arm test."
-            }), 400
-
-        if robot_y > 400:
-            print("SAFETY STOP: Y position too far:", robot_y)
-            return jsonify({
-                "success": False,
-                "error": "Object is outside the calibrated Y range."
-            }), 400
-
-        # ====================================================
-        # SEND POSITION TO R4
-        # ====================================================
         command = f"MOVE {robot_x:.1f} {robot_y:.1f} 0.0"
         serial_success = send_to_r4(command)
 
-        print()
-        print("=" * 60)
-        print("OBJECT SELECTED")
-        print("=" * 60)
-        print(f"Camera center: ({selected_candidate['cx']}, {selected_candidate['cy']})")
-        print(f"Robot X: {robot_x:.1f} mm")
-        print(f"Robot Y: {robot_y:.1f} mm")
-        print("R4 command:", command)
-        print("Serial:", "SENT" if serial_success else "NOT CONNECTED")
-        print("=" * 60)
-
         return jsonify({
             "success": True,
-            "candidate": selected_candidate,
+            "target": target,
             "serial_sent": serial_success
         })
 
     except Exception as error:
-        print("SELECT ERROR:", repr(error))
+        print("MOVE ERROR:", repr(error))
+        return jsonify({"success": False, "error": str(error)}), 500
+
+
+@app.route("/release", methods=["POST"])
+def release():
+    try:
+        command = "RESET"
+        serial_success = send_to_r4(command)
+
+        return jsonify({
+            "success": True,
+            "serial_sent": serial_success
+        })
+
+    except Exception as error:
+        print("RELEASE ERROR:", repr(error))
         return jsonify({"success": False, "error": str(error)}), 500
 
 
@@ -1033,25 +646,6 @@ if __name__ == "__main__":
         daemon=True
     )
     camera_thread.start()
-
-    print()
-    print("=" * 60)
-    print("ATLAS ARM POSITION TEST")
-    print("=" * 60)
-    print("Camera: 640x480")
-    print("Rotation: 90 degrees")
-    print("Port: 5000")
-    print()
-    print("Servo pins:")
-    print("Base  = D9")
-    print("Arm1  = D10")
-    print("Arm2  = D11")
-    print("Claw  = D6")
-    print()
-    print("Rest Position: Whole arm pointing straight up")
-    print()
-    print("Open http://<PI-IP>:5000")
-    print("=" * 60)
 
     app.run(
         host="0.0.0.0",
